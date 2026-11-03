@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "SubsPlease qBittorrent RSS Manager",
+  "version": "1.0.0",
+  "description": "Add and remove exact-title SubsPlease RSS download rules from the schedule.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://subsplease.org/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SubsPlease RSS Manager"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://subsplease.org/schedule*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

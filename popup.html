@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SubsPlease RSS Manager</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header class="header-row">
+      <div class="header-copy">
+        <h1>qBittorrent connection</h1>
+        <p>Configure the Web UI used to manage SubsPlease RSS rules.</p>
+      </div>
+
+      <label class="theme-toggle" for="theme-toggle" aria-label="Toggle dark mode">
+        <span class="theme-label">Dark</span>
+        <input id="theme-toggle" type="checkbox" checked>
+        <span class="theme-switch" aria-hidden="true"></span>
+      </label>
+    </header>
+
+    <form id="settings-form">
+      <label for="url">Web UI URL</label>
+      <input id="url" type="url" value="http://localhost:8039" placeholder="http://localhost:8039" required>
+
+      <label for="username">Username</label>
+      <input id="username" type="text" autocomplete="username" required>
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+
+      <label for="feed-select">Default RSS feed</label>
+      <select id="feed-select" disabled>
+        <option value="">Connect to load feeds</option>
+      </select>
+
+      <div class="actions">
+        <button type="button" id="test" class="secondary">Test connection</button>
+        <button type="submit">Save settings</button>
+      </div>
+    </form>
+
+    <div class="connection-row">
+      <span id="status-dot" class="dot"></span>
+      <span id="status">Not connected</span>
+    </div>
+    <p class="footnote">Credentials are stored in Chrome extension storage. Use the qBittorrent Web UI on a trusted local network and avoid exposing it to the public internet.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+.sp-qbt-rule-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 6px 0 4px 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  color: #fff;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.sp-qbt-rule-button.is-missing { background: #188038; }
+.sp-qbt-rule-button.is-added { background: #d93025; }
+.sp-qbt-rule-button:disabled { opacity: .65; cursor: wait; }

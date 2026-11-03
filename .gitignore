@@ -1,0 +1,17 @@
+# Local editor artifacts
+.DS_Store
+Thumbs.db
+
+# Packaging / build output
+*.zip
+*.crx
+*.pem
+*.log
+
+# Generated or local-only files
+/dist/
+/build/
+
+# VS Code / tooling caches
+.vscode/
+.idea/
