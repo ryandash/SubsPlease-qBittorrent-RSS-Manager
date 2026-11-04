@@ -20,7 +20,6 @@ export function renderFeedOptions(select, feeds, selected) {
         ? {
             label: feed,
             value: feed,
-            // Include display property for compatibility with the composite key format
             display: feed,
           }
         : {
@@ -42,12 +41,9 @@ export function renderFeedOptions(select, feeds, selected) {
 
   const options = [...uniqueFeeds.values()];
 
-  // Determine which feed is selected - check both the simple value and the composite Map key
   const selectedValue =
     options.find((option) => option.value === selected)?.value ||
-    options.find(
-      (option) => `${option.value}\u0000${option.label}` === selected,
-    )?.value ||
+    options.find((option) => `${option.value}\u0000${option.label}` === selected)?.value ||
     options[0].value;
 
   const fragment = document.createDocumentFragment();

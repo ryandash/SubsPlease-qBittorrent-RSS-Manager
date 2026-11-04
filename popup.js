@@ -52,12 +52,16 @@ async function finishConnectionTest(settings, permission, initialSave = Promise.
     const feedOptions = feeds.ok ? feeds.feeds || feeds.names || [] : [];
     const selectedFeed =
       storedSettings.defaultFeed || feedOptions[0]?.value || feedOptions[0] || "";
+    const selectedFeedLabel =
+      feedOptions.find((option) => option.value === selectedFeed)?.label ||
+      feedOptions[0]?.label || "";
     renderFeedOptions(elements.feedSelect, feedOptions, selectedFeed);
     await setLocalStorage({
       settings: {
         ...storedSettings,
         ...settings,
         defaultFeed: elements.feedSelect.value || selectedFeed,
+        defaultFeedLabel: selectedFeedLabel,
       },
     });
 
@@ -99,7 +103,12 @@ async function loadSettings() {
   elements.username.value = settings.username || "";
   elements.password.value = settings.password || "";
   if (settings.defaultFeed) {
-    renderFeedOptions(elements.feedSelect, [settings.defaultFeed], settings.defaultFeed);
+    const storedLabel = settings.defaultFeedLabel || settings.defaultFeed;
+    renderFeedOptions(
+      elements.feedSelect,
+      [{ label: storedLabel, value: settings.defaultFeed }],
+      settings.defaultFeed,
+    );
   }
   showStatus(elements, "Settings loaded. Test the connection to refresh feeds.");
 }

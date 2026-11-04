@@ -49,7 +49,6 @@ export class QbittorrentClient {
         "Configure the qBittorrent URL, username, and password in the extension popup.",
       );
     }
-
     this.settings = { ...settings, url: normalizeUrl(settings.url) };
     this.key = `${this.settings.url}\u0000${this.settings.username}\u0000${this.settings.password}`;
   }
@@ -83,7 +82,6 @@ export class QbittorrentClient {
   async login() {
     if (loggedInSettings.has(this.key)) return;
     if (pendingLogins.has(this.key)) return pendingLogins.get(this.key);
-
     const request = (async () => {
       const response = await this.fetch("/api/v2/auth/login", {
         method: "POST",
@@ -95,7 +93,6 @@ export class QbittorrentClient {
       const text = await response.text();
       const succeeded =
         response.status === 204 || (response.status === 200 && text.trim() === "Ok.");
-
       if (!succeeded) {
         throw new Error(
           text.trim() ||
@@ -104,14 +101,11 @@ export class QbittorrentClient {
       }
       loggedInSettings.add(this.key);
     })();
-
     pendingLogins.set(this.key, request);
     try {
       await request;
     } catch (error) {
-      throw new Error(
-        `qBittorrent login failed for ${this.url}: ${error?.message || String(error)}`,
-      );
+      throw new Error(`qBittorrent login failed for ${this.url}: ${error?.message || String(error)}`);
     } finally {
       pendingLogins.delete(this.key);
     }
@@ -125,11 +119,8 @@ export class QbittorrentClient {
       response = await this.fetch(path, options);
     }
     if (response.ok) return response;
-
     const detail = (await response.text()).trim() || `HTTP ${response.status}`;
-    throw new Error(
-      `qBittorrent returned HTTP ${response.status} for ${path} (${this.url}): ${detail}`,
-    );
+    throw new Error(`qBittorrent returned HTTP ${response.status} for ${path} (${this.url}): ${detail}`);
   }
 
   async getVersion() {
@@ -154,9 +145,8 @@ export class QbittorrentClient {
       try {
         const feeds = feedEntries(await (await this.request(path)).json());
         if (feeds.length) return feeds;
-      } catch {
-        // Older qBittorrent versions do not expose every RSS endpoint.
-      }
+        } catch {
+        }
     }
     return [];
   }
@@ -164,12 +154,10 @@ export class QbittorrentClient {
   async addRule(title) {
     const ruleName = String(title || "").trim();
     if (!ruleName) throw new Error("A schedule title is required to create an RSS rule.");
-
     const normalizedTitle = normalizeRuleName(ruleName);
     if ((await this.getRuleNames()).some((name) => normalizeRuleName(name) === normalizedTitle)) {
       return { ruleName, alreadyExists: true };
     }
-
     const affectedFeeds = [this.settings.defaultFeed]
       .flat()
       .map((feed) => String(feed || "").trim())
@@ -177,7 +165,6 @@ export class QbittorrentClient {
     if (!affectedFeeds.length) {
       throw new Error("Choose a default RSS feed in the extension popup before creating a rule.");
     }
-
     const rule = {
       enabled: true,
       mustContain: ruleName,
@@ -201,12 +188,10 @@ export class QbittorrentClient {
   async removeRule(title) {
     const ruleName = String(title || "").trim();
     if (!ruleName) throw new Error("A schedule title is required to remove an RSS rule.");
-
     const normalizedTitle = normalizeRuleName(ruleName);
     if (!(await this.getRuleNames()).some((name) => normalizeRuleName(name) === normalizedTitle)) {
       return { ruleName, notFound: true };
     }
-
     const response = await this.request("/api/v2/rss/removeRule", {
       method: "POST",
       body: new URLSearchParams({ ruleName }),
