@@ -20,7 +20,12 @@
         container: link.closest("td.all-schedule-show") || link.parentElement,
         title: app.normalizeTitle(link.textContent),
       }))
-      .filter((entry) => entry.container && entry.title.length >= 2 && entry.title.length <= 100);
+      .filter(
+        (entry) =>
+          entry.container &&
+          entry.title.length >= 2 &&
+          entry.title.length <= 100,
+      );
   }
 
   function setButtonState(button, title) {
@@ -39,9 +44,10 @@
   }
 
   function disableRuleButtons(label, title) {
+    const hideLabel = label === "qBittorrent unavailable";
     document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
       button.disabled = true;
-      button.textContent = label;
+      button.textContent = hideLabel ? "" : label;
       button.title = title;
     });
   }
@@ -62,7 +68,9 @@
 
   function getMissingRuleNames(rules, settings, scheduleTitles) {
     const missing = new Set();
-    const defaultFeed = String(settings.defaultFeed || "").trim().toLowerCase();
+    const defaultFeed = String(settings.defaultFeed || "")
+      .trim()
+      .toLowerCase();
 
     for (const [ruleName, rawRule] of Object.entries(rules || {})) {
       const title = String(ruleName || "").trim();
@@ -81,7 +89,9 @@
         ? rule.affectedFeeds
         : [rule?.affectedFeeds].filter(Boolean);
       const appliesToSelectedFeed = affectedFeeds.some((feed) => {
-        const value = String(feed || "").trim().toLowerCase();
+        const value = String(feed || "")
+          .trim()
+          .toLowerCase();
         return (
           value.includes("subsplease") ||
           (defaultFeed &&
@@ -102,7 +112,8 @@
 
     container = document.createElement("div");
     container.id = WIDGET_ID;
-    container.className = "sidebar widget-area sidebar-widget-area homepage-widget";
+    container.className =
+      "sidebar widget-area sidebar-widget-area homepage-widget";
     const secondary = document.getElementById("secondary");
     const secondaryBackground = secondary
       ? window.getComputedStyle(secondary).backgroundColor
@@ -127,10 +138,13 @@
     const entries = getScheduleEntries();
     if (!entries.length) return;
 
-    const scheduleTitles = new Set(entries.map(({ title }) => app.normalizeRuleName(title)));
+    const scheduleTitles = new Set(
+      entries.map(({ title }) => app.normalizeRuleName(title)),
+    );
     const missingRules = getMissingRuleNames(rules, settings, scheduleTitles);
     const container = getWidgetContainer();
-    const heading = container.querySelector("h2") || document.createElement("h2");
+    const heading =
+      container.querySelector("h2") || document.createElement("h2");
     if (!heading.parentNode) container.append(heading);
     heading.textContent = "Remaining RSS Anime";
 
@@ -144,7 +158,8 @@
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 2;
-      cell.textContent = "No RSS rules for this feed are missing from the current schedule.";
+      cell.textContent =
+        "No RSS rules for this feed are missing from the current schedule.";
       row.append(cell);
       fragment.append(row);
     } else {
@@ -199,7 +214,10 @@
     try {
       const result = await request;
       if (result?.ok && result.rules && typeof result.rules === "object") {
-        state.ruleCache.set(key, { result, expiresAt: Date.now() + RULE_CACHE_MS });
+        state.ruleCache.set(key, {
+          result,
+          expiresAt: Date.now() + RULE_CACHE_MS,
+        });
       }
       return result;
     } finally {
@@ -275,14 +293,19 @@
         title: button.dataset.animeTitle,
         settings: await app.getSettings(),
       });
-      if (!result?.ok) throw new Error(result?.error || "Could not delete the RSS rule.");
+      if (!result?.ok)
+        throw new Error(result?.error || "Could not delete the RSS rule.");
 
-      state.knownRuleNames.delete(app.normalizeRuleName(button.dataset.animeTitle));
+      state.knownRuleNames.delete(
+        app.normalizeRuleName(button.dataset.animeTitle),
+      );
       state.ruleCache.clear();
       await refreshRulesAndMissingList();
     } catch (error) {
       button.disabled = false;
-      window.alert(`SubsPlease RSS Manager: ${error?.message || "Could not delete the RSS rule."}`);
+      window.alert(
+        `SubsPlease RSS Manager: ${error?.message || "Could not delete the RSS rule."}`,
+      );
     }
   }
 
@@ -308,7 +331,10 @@
       observer.disconnect();
       initialize();
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
     const timeout = setTimeout(() => {
       observer.disconnect();
       initialize();
