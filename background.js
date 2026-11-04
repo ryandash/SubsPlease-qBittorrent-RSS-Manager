@@ -1,4 +1,13 @@
+const DEBUG = true;
+
+function debugLog(label, details) {
+  if (!DEBUG) return;
+  const payload = details === undefined ? {} : details;
+  console.debug(`[sp-qbt-bg] ${label}`, payload);
+}
+
 function storageGet(keys) {
+  debugLog("storageGet", { keys });
   return new Promise((resolve, reject) => {
     try {
       chrome.storage.local.get(keys, (result) => {
@@ -13,20 +22,26 @@ function storageGet(keys) {
 }
 
 async function getSettings() {
+  debugLog("getSettings:start");
   const { settings } = await storageGet("settings");
   if (!settings?.url || !settings.username || !settings.password) {
+    debugLog("getSettings:missing-settings", { settings: sanitizeSettings(settings) });
     throw new Error(
       "Configure the qBittorrent URL, username, and password in the extension popup.",
     );
   }
+  debugLog("getSettings:loaded", { settings: sanitizeSettings(settings) });
   return settings;
 }
 
 function apiUrl(base, path) {
-  return `${base.replace(/\/+$/, "")}${path}`;
+  const url = `${base.replace(/\/+$/, "")}${path}`;
+  debugLog("apiUrl", { base, path, url });
+  return url;
 }
 
 async function apiRequest(settings, path, options = {}) {
+  debugLog("apiRequest:start", { url: settings?.url, path, method: options.method || "GET" });
   try {
     const response = await fetch(apiUrl(settings.url, path), {
       method: options.method || "GET",
@@ -39,13 +54,16 @@ async function apiRequest(settings, path, options = {}) {
     if (!response.ok) {
       const errorText = await response.text();
       const detail = errorText.trim() || `HTTP ${response.status}`;
+      debugLog("apiRequest:response-not-ok", { path, status: response.status, detail });
       throw new Error(
         `qBittorrent returned HTTP ${response.status} for ${path} (${settings.url}): ${detail}`,
       );
     }
+    debugLog("apiRequest:success", { path, status: response.status });
     return response;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    debugLog("apiRequest:error", { path, detail });
     throw new Error(
       `qBittorrent request failed for ${path} (${settings.url}): ${detail}`,
     );
@@ -53,14 +71,7 @@ async function apiRequest(settings, path, options = {}) {
 }
 
 function candidateSettings(settings) {
-  const urls = new Set([settings.url]);
-  if (settings.url !== "http://localhost:8039")
-    urls.add("http://localhost:8039");
-  if (settings.url !== "http://localhost:8080")
-    urls.add("http://localhost:8080");
-  if (settings.url !== "http://127.0.0.1:8039")
-    urls.add("http://127.0.0.1:8039");
-  return [...urls].map((url) => ({ ...settings, url }));
+  return [{ ...settings, url: settings.url }];
 }
 
 const loginAttemptState = {
@@ -91,6 +102,7 @@ async function makeLoginKey(settings) {
 }
 
 async function waitForApiAvailability(settings) {
+  debugLog("waitForApiAvailability:start", { url: settings.url });
   const statusUrl = apiUrl(settings.url, "/api/v2/app/version");
 
   while (!loginAttemptState.attempted) {
@@ -100,23 +112,30 @@ async function waitForApiAvailability(settings) {
         credentials: "include",
       });
       if (response && response.status >= 100 && response.status < 600) {
+        debugLog("waitForApiAvailability:reachable", { status: response.status });
         return true;
       }
-    } catch {
+    } catch (error) {
+      debugLog("waitForApiAvailability:retrying", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       // qBittorrent is not reachable yet; keep polling until the API responds.
     }
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
+  debugLog("waitForApiAvailability:aborted", { attempted: loginAttemptState.attempted });
   return false;
 }
 
 async function login(settings) {
+  debugLog("login:start", { url: settings.url, username: settings.username ? "[redacted]" : null });
   if (!settings.username && !settings.password) return;
 
   const loginKey = await makeLoginKey(settings);
   if (inFlightLogins.has(loginKey)) {
+    debugLog("login:in-flight", { loginKey });
     return inFlightLogins.get(loginKey);
   }
 
@@ -142,6 +161,8 @@ async function login(settings) {
         response.status === 204 ||
         (response.status === 200 && text.trim() === "Ok.");
 
+      debugLog("login:response", { status: response.status, text: text.trim() });
+
       if (!successfulLogin) {
         throw new Error(
           text.trim() ||
@@ -149,8 +170,10 @@ async function login(settings) {
         );
       }
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      debugLog("login:error", { detail });
       throw new Error(
-        `qBittorrent login failed for ${settings.url}: ${error.message || String(error)}`,
+        `qBittorrent login failed for ${settings.url}: ${detail}`,
       );
     }
   })();
@@ -164,14 +187,19 @@ async function login(settings) {
 }
 
 async function authenticated(settings, path, options = {}) {
+  debugLog("authenticated:start", { path, candidates: candidateSettings(settings).length });
   let lastError;
   for (const candidate of candidateSettings(settings)) {
     try {
-      return await apiRequest(candidate, path, options);
+      const response = await apiRequest(candidate, path, options);
+      debugLog("authenticated:success", { path, url: candidate.url });
+      return response;
     } catch (error) {
       lastError = error;
+      debugLog("authenticated:retry", { path, url: candidate.url, error: error.message });
     }
   }
+  debugLog("authenticated:failed", { path, error: lastError?.message || "Unable to reach qBittorrent." });
   throw lastError || new Error("Unable to reach qBittorrent.");
 }
 
@@ -205,12 +233,15 @@ async function refreshRulesOnPage() {
 }
 
 async function backgroundLoginOnce() {
+  debugLog("backgroundLoginOnce:start", { attempted: loginAttemptState.attempted, pollActive: loginAttemptState.pollActive });
   if (loginAttemptState.attempted || loginAttemptState.pollActive) {
+    debugLog("backgroundLoginOnce:already-processed", { success: loginAttemptState.success });
     return loginAttemptState.success;
   }
 
   const { settings } = await storageGet("settings");
   if (!settings?.url || !settings.username || !settings.password) {
+    debugLog("backgroundLoginOnce:missing-settings");
     loginAttemptState.attempted = true;
     loginAttemptState.success = false;
     return false;
@@ -225,8 +256,10 @@ async function backgroundLoginOnce() {
     loginAttemptState.success = true;
     loginAttemptState.pollActive = false;
     await refreshRulesOnPage();
+    debugLog("backgroundLoginOnce:success");
     return true;
-  } catch {
+  } catch (error) {
+    debugLog("backgroundLoginOnce:failure", { error: error instanceof Error ? error.message : String(error) });
     loginAttemptState.attempted = true;
     loginAttemptState.success = false;
     loginAttemptState.pollActive = false;
@@ -234,27 +267,20 @@ async function backgroundLoginOnce() {
   }
 }
 
-async function logout(settings) {
-  if (!settings.username && !settings.password) return;
-  try {
-    await fetch(apiUrl(settings.url, "/api/v2/auth/logout"), {
-      method: "POST",
-      credentials: "include",
-    });
-  } catch {
-    // Ignore logout failures; the session is already being used for this check.
-  }
-}
-
 async function getRules(settings) {
+  debugLog("getRules:start", { url: settings.url });
   const response = await authenticated(settings, "/api/v2/rss/rules");
   const rules = await response.json();
+  debugLog("getRules:loaded", { ruleCount: Object.keys(rules || {}).length });
   return rules;
 }
 
 async function getRuleNames(settings) {
+  debugLog("getRuleNames:start", { url: settings.url });
   const rules = await getRules(settings);
-  return Object.keys(rules || {});
+  const names = Object.keys(rules || {});
+  debugLog("getRuleNames:loaded", { count: names.length });
+  return names;
 }
 
 function encodeForm(values) {
@@ -308,6 +334,7 @@ function normalizeFeedEntries(payload) {
 }
 
 async function getFeeds(settings) {
+  debugLog("getFeeds:start", { url: settings.url });
   const attempts = [
     "/api/v2/rss/items",
     "/api/v2/rss/folders",
@@ -405,58 +432,68 @@ async function removeRule(settings, title) {
 }
 
 async function handleMessage(message) {
-  const settings = message.settings || (await getSettings());
-  if (message.type === "START_QBITTORRENT_PROBE") {
-    const started = await backgroundLoginOnce();
-    return { ok: true, started };
-  }
-  if (message.type === "TEST_CONNECTION") {
-    await waitForApiAvailability(settings);
-    await login(settings);
-    loginAttemptState.attempted = true;
-    loginAttemptState.success = true;
-    const response = await apiRequest(settings, "/api/v2/app/version");
-    const version = (await response.text()).trim();
-    const pageRefreshed = await refreshRulesOnPage();
-    return { ok: true, version, pageRefreshed };
-  }
-  if (message.type === "GET_FEEDS") {
-    const feeds = await getFeeds(settings);
-    const names = feeds.map(
-      (feed) => feed.display || feed.label || feed.value || feed,
-    );
-    return {
-      ok: true,
-      feeds,
-      names,
-    };
-  }
-  if (message.type === "GET_RULES") {
-    const rules = await getRules(settings);
-    const names = Object.keys(rules || {});
-    return {
-      ok: true,
-      rules,
-      names,
-    };
-  }
-  if (message.type === "ADD_RULE") {
-    const result = await addRule(settings, message.title);
-    return { ok: true, ...result };
-  }
-  if (message.type === "REMOVE_RULE") {
-    const result = await removeRule(settings, message.title);
-    return { ok: true, ...result };
-  }
-  throw new Error("Unknown extension message.");
+debugLog("handleMessage:start", { type: message?.type });
+const settings = message.settings || (await getSettings());
+if (message.type === "START_QBITTORRENT_PROBE") {
+  const started = await backgroundLoginOnce();
+  debugLog("handleMessage:START_QBITTORRENT_PROBE", { started });
+  return { ok: true, started };
+}
+if (message.type === "TEST_CONNECTION") {
+  await waitForApiAvailability(settings);
+  await login(settings);
+  loginAttemptState.attempted = true;
+  loginAttemptState.success = true;
+  const response = await apiRequest(settings, "/api/v2/app/version");
+  const version = (await response.text()).trim();
+  const pageRefreshed = await refreshRulesOnPage();
+  debugLog("handleMessage:TEST_CONNECTION", { version, pageRefreshed });
+  return { ok: true, version, pageRefreshed };
+}
+if (message.type === "GET_FEEDS") {
+  const feeds = await getFeeds(settings);
+  const names = feeds.map(
+    (feed) => feed.display || feed.label || feed.value || feed,
+  );
+  debugLog("handleMessage:GET_FEEDS", { feedCount: feeds.length });
+  return {
+    ok: true,
+    feeds,
+    names,
+  };
+}
+if (message.type === "GET_RULES") {
+  const rules = await getRules(settings);
+  const names = Object.keys(rules || {});
+  debugLog("handleMessage:GET_RULES", { ruleCount: names.length });
+  return {
+    ok: true,
+    rules,
+    names,
+  };
+}
+if (message.type === "ADD_RULE") {
+  const result = await addRule(settings, message.title);
+  debugLog("handleMessage:ADD_RULE", { title: message.title, result });
+  return { ok: true, ...result };
+}
+if (message.type === "REMOVE_RULE") {
+  const result = await removeRule(settings, message.title);
+  debugLog("handleMessage:REMOVE_RULE", { title: message.title, result });
+  return { ok: true, ...result };
+}
+debugLog("handleMessage:unknown", { type: message?.type });
+throw new Error("Unknown extension message.");
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  handleMessage(message)
-    .then(sendResponse)
-    .catch((error) =>
-      sendResponse({ ok: false, error: error.message || String(error) }),
-    );
-  return true;
+debugLog("runtime.onMessage", { type: message?.type });
+handleMessage(message)
+  .then(sendResponse)
+  .catch((error) => {
+    debugLog("runtime.onMessage:error", { error: error.message || String(error) });
+    sendResponse({ ok: false, error: error.message || String(error) });
+  });
+return true;
 });
 

@@ -1,12 +1,23 @@
 (() => {
   const BUTTON_CLASS = "sp-qbt-rule-button";
   const THEME_STYLE_ID = "sp-qbt-page-theme-styles";
+  const DEBUG = true;
   let knownRuleNames = new Set();
   const artworkCache = new Map();
   const artworkRequests = new Map();
+  const ruleResultCache = new Map();
+  let ruleRequestInFlight = null;
   let startHandled = false;
+  let missingRuleRenderGeneration = 0;
+
+  function debugLog(label, details) {
+    if (!DEBUG) return;
+    const payload = details === undefined ? {} : details;
+    console.debug(`[sp-qbt] ${label}`, payload);
+  }
 
   function injectThemeStyles() {
+    debugLog("injectThemeStyles", { themeStyleId: THEME_STYLE_ID });
     if (document.getElementById(THEME_STYLE_ID)) return;
 
     const style = document.createElement("style");
@@ -164,6 +175,9 @@
   }
 
   function findScheduleEntries() {
+    debugLog("findScheduleEntries", {
+      hasTable: !!document.querySelector("#full-schedule-table"),
+    });
     const table = document.querySelector("#full-schedule-table");
     if (!table) {
       const selectors = [
@@ -244,9 +258,24 @@
   async function resolveArtworkForTitle(title) {
     const query = String(title || "").trim();
     const cacheKey = normalizeRuleLookupValue(query);
-    if (!query) return { href: "#", imageUrl: "" };
-    if (artworkCache.has(cacheKey)) return artworkCache.get(cacheKey);
-    if (artworkRequests.has(cacheKey)) return artworkRequests.get(cacheKey);
+    debugLog("resolveArtworkForTitle:start", { title: query, cacheKey });
+    if (!query) {
+      debugLog("resolveArtworkForTitle:empty", { title: query });
+      return { href: "#", imageUrl: "" };
+    }
+    if (artworkCache.has(cacheKey)) {
+      const cached = artworkCache.get(cacheKey);
+      debugLog("resolveArtworkForTitle:cache-hit", {
+        title: query,
+        href: cached?.href || "#",
+      });
+      return cached;
+    }
+    if (artworkRequests.has(cacheKey)) {
+      const pending = artworkRequests.get(cacheKey);
+      debugLog("resolveArtworkForTitle:request-pending", { title: query });
+      return pending;
+    }
 
     const request = (async () => {
       try {
@@ -281,7 +310,13 @@
 
     artworkRequests.set(cacheKey, request);
     try {
-      return await request;
+      const result = await request;
+      debugLog("resolveArtworkForTitle:resolved", {
+        title: query,
+        href: result?.href || "#",
+        imageUrl: result?.imageUrl || "",
+      });
+      return result;
     } finally {
       artworkRequests.delete(cacheKey);
     }
@@ -289,16 +324,23 @@
 
   async function hydrateArtworkLink(title, link) {
     const cacheKey = normalizeRuleLookupValue(title);
+    if (link.dataset.artworkResolved === "true") return;
+
     const cachedArtwork = artworkCache.get(cacheKey);
     if (cachedArtwork) {
       link.href = cachedArtwork.href || "#";
-      if (cachedArtwork.imageUrl) link.setAttribute("data-preview-image", cachedArtwork.imageUrl);
+      if (cachedArtwork.imageUrl) {
+        link.setAttribute("data-preview-image", cachedArtwork.imageUrl);
+      }
+      link.dataset.artworkResolved = "true";
       return;
     }
 
     const artwork = await resolveArtworkForTitle(title);
     if (artwork.href && artwork.href !== "#") link.href = artwork.href;
-    if (artwork.imageUrl) link.setAttribute("data-preview-image", artwork.imageUrl);
+    if (artwork.imageUrl)
+      link.setAttribute("data-preview-image", artwork.imageUrl);
+    link.dataset.artworkResolved = "true";
   }
 
   function setButtonState(button, title) {
@@ -324,16 +366,28 @@
       : "Create a 1080p RSS download rule";
   }
 
+  function hasScheduleLinks() {
+    return !!(
+      document.querySelector("#full-schedule-table tr td.all-schedule-show a") ||
+      document.querySelector("#full-schedule-table td.all-schedule-show a")
+    );
+  }
+
   function getCurrentScheduleTitles() {
     const titles = new Set();
     const nodes = document.querySelectorAll(
       "#full-schedule-table td.all-schedule-show a, #schedule-table .schedule-widget-show a, .schedule-widget-show a",
     );
     nodes.forEach((link) => {
+      if (link.closest("#sp-qbt-missing-rules-widget")) return;
       const title = normalizeTitle(link.textContent || "");
       if (title) titles.add(normalizeRuleLookupValue(title));
     });
     return titles;
+  }
+
+  function getSettingsKey(settings) {
+    return `${settings?.url || ""}|${settings?.username || ""}|${settings?.password || ""}`;
   }
 
   function normalizeFeedValue(value) {
@@ -357,9 +411,8 @@
     return false;
   }
 
-  async function buildMissingRuleWidget(rules, settings) {
-    const scheduleTitles = getCurrentScheduleTitles();
-    const missing = [];
+  function getMissingRuleNames(rules, settings, scheduleTitles = getCurrentScheduleTitles()) {
+    const missing = new Set();
 
     for (const [ruleName, ruleDef] of Object.entries(rules || {})) {
       const candidateName = String(ruleName || "").trim();
@@ -387,7 +440,31 @@
 
       const normalizedRuleName = normalizeRuleLookupValue(candidateName);
       if (scheduleTitles.has(normalizedRuleName)) continue;
-      missing.push(candidateName);
+      missing.add(candidateName);
+    }
+
+    return [...missing].sort((a, b) => a.localeCompare(b));
+  }
+
+  async function buildRuleWidget(rules, settings) {
+    const generation = ++missingRuleRenderGeneration;
+    debugLog("buildRuleWidget:start", {
+      ruleCount: Object.keys(rules || {}).length,
+      generation,
+    });
+
+    if (!hasScheduleLinks()) {
+      debugLog("buildRuleWidget:waiting-for-schedule", { generation });
+      return;
+    }
+
+    const scheduleTitles = getCurrentScheduleTitles();
+    const missing = getMissingRuleNames(rules, settings, scheduleTitles);
+    const preloadTitles = missing.slice(0, 8);
+    if (preloadTitles.length) {
+      void Promise.allSettled(
+        preloadTitles.map((title) => resolveArtworkForTitle(title)),
+      );
     }
 
     const widgetId = "sp-qbt-missing-rules-widget";
@@ -434,16 +511,16 @@
     }
     heading.textContent = "Remaining RSS Anime";
 
-    let table = container.querySelector("table");
-    if (!table) {
-      table = document.createElement("table");
-      table.cellPadding = 0;
-      table.cellSpacing = 0;
-      table.border = 0;
-      container.appendChild(table);
-    }
+    const existingTable = container.querySelector("table");
+    const nextTable = document.createElement("table");
+    nextTable.cellPadding = 0;
+    nextTable.cellSpacing = 0;
+    nextTable.border = 0;
 
-    table.innerHTML = "";
+    debugLog("buildRuleWidget:result", {
+      missingCount: missing.length,
+      scheduleCount: scheduleTitles.size,
+    });
 
     if (!missing.length) {
       const row = document.createElement("tr");
@@ -452,9 +529,8 @@
       cell.textContent =
         "No RSS rules for this feed are missing from the current schedule.";
       row.appendChild(cell);
-      table.appendChild(row);
+      nextTable.appendChild(row);
     } else {
-      missing.sort((a, b) => a.localeCompare(b));
       for (const title of missing) {
         const row = document.createElement("tr");
         row.className = "schedule-widget-item";
@@ -515,32 +591,138 @@
           link.dataset.artworkLoaded = "true";
           hydrateArtworkLink(title, link);
         };
-        link.addEventListener("mouseenter", hydrateOnInteraction, { once: true });
+        link.addEventListener("mouseenter", hydrateOnInteraction, {
+          once: true,
+        });
         link.addEventListener("focus", hydrateOnInteraction, { once: true });
-        link.addEventListener("pointerover", hydrateOnInteraction, { once: true });
+        link.addEventListener("pointerover", hydrateOnInteraction, {
+          once: true,
+        });
 
         showCell.appendChild(button);
         showCell.appendChild(link);
         row.appendChild(showCell);
 
-        table.appendChild(row);
+        void hydrateArtworkLink(title, link);
+        nextTable.appendChild(row);
+      }
+    }
+
+    if (generation !== missingRuleRenderGeneration) {
+      debugLog("buildRuleWidget:skipped-stale-render", { generation });
+      return;
+    }
+
+    if (existingTable) {
+      existingTable.replaceWith(nextTable);
+    } else {
+      container.appendChild(nextTable);
+    }
+  }
+
+  async function fetchRulesFromQbittorrent(settings, retries = 3) {
+    const cacheKey = getSettingsKey(settings);
+    const cachedResult = ruleResultCache.get(cacheKey);
+    if (cachedResult) {
+      debugLog("fetchRulesFromQbittorrent:cache-hit", { cacheKey });
+      return cachedResult;
+    }
+    if (ruleRequestInFlight && ruleRequestInFlight.key === cacheKey) {
+      debugLog("fetchRulesFromQbittorrent:in-flight", { cacheKey });
+      return ruleRequestInFlight.promise;
+    }
+
+    debugLog("fetchRulesFromQbittorrent:start", { retries, cacheKey });
+    const request = (async () => {
+      let lastResult = null;
+      for (let attempt = 0; attempt < retries; attempt += 1) {
+        const result = await sendRuntimeMessage({ type: "GET_RULES", settings });
+        lastResult = result;
+        debugLog("fetchRulesFromQbittorrent:attempt", {
+          attempt: attempt + 1,
+          ok: !!result?.ok,
+          ruleCount: Object.keys(result?.rules || {}).length,
+        });
+        if (result?.ok && result.rules) {
+          ruleResultCache.set(cacheKey, result);
+          return result;
+        }
+        if (attempt < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      debugLog("fetchRulesFromQbittorrent:failed", {
+        error: lastResult?.error || "Could not fetch RSS rules.",
+      });
+      return lastResult || { ok: false, error: "Could not fetch RSS rules." };
+    })();
+
+    ruleRequestInFlight = { key: cacheKey, promise: request };
+    try {
+      return await request;
+    } finally {
+      if (ruleRequestInFlight?.key === cacheKey) {
+        ruleRequestInFlight = null;
       }
     }
   }
 
-  async function refreshMissingRuleList(existingResult) {
+  async function refreshRulesAndMissingList(existingResult) {
+    debugLog("refreshRulesAndMissingList:start", {
+      hasExistingResult: !!existingResult,
+    });
     const settingsResult = await storageGet("settings");
     const settings = settingsResult?.settings;
-    if (!settings?.url || !settings.username || !settings.password) return;
 
-    const result =
-      existingResult ||
-      (await sendRuntimeMessage({ type: "GET_RULES", settings }));
-    if (!result?.ok || !result.rules) return;
-    await buildMissingRuleWidget(result.rules, settings);
+    if (!settings?.url || !settings.username || !settings.password) {
+      debugLog("refreshRulesAndMissingList:missing-settings");
+      document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
+        button.disabled = true;
+        button.textContent = "Configure qBittorrent";
+        button.title =
+          "Set up the qBittorrent connection in the extension popup.";
+      });
+      return;
+    }
+
+    if (!hasScheduleLinks()) {
+      debugLog("refreshRulesAndMissingList:waiting-for-schedule");
+      return;
+    }
+
+    const result = existingResult || (await fetchRulesFromQbittorrent(settings));
+
+    if (!result?.ok || !result.rules) {
+      debugLog("refreshRulesAndMissingList:unavailable", { error: result?.error });
+      document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
+        button.disabled = true;
+        button.textContent = "qBittorrent unavailable";
+        button.title =
+          result?.error || "Configure qBittorrent in the extension popup.";
+      });
+      return;
+    }
+
+    knownRuleNames = new Set(
+      (result.names || []).map((name) => normalizeRuleLookupValue(name)),
+    );
+    debugLog("refreshRulesAndMissingList:known-rules", {
+      count: knownRuleNames.size,
+    });
+    document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
+      button.disabled = false;
+      setButtonState(button, button.dataset.animeTitle || "");
+    });
+
+    debugLog("refreshRulesAndMissingList:rules-fetched", {
+      ruleCount: Object.keys(result.rules || {}).length,
+    });
+    await buildRuleWidget(result.rules, settings);
+    return result;
   }
 
   function storageGet(keys) {
+    debugLog("storageGet", { keys });
     return new Promise((resolve) => {
       try {
         chrome.storage.local.get(keys, (result) => {
@@ -558,6 +740,7 @@
   }
 
   function sendRuntimeMessage(message) {
+    debugLog("sendRuntimeMessage", { type: message?.type });
     return new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(message, (response) => {
@@ -579,47 +762,15 @@
     });
   }
 
-  async function refreshRules() {
-    const settingsResult = await storageGet("settings");
-    const settings = settingsResult?.settings;
-
-    if (!settings?.url || !settings.username || !settings.password) {
-      document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
-        button.disabled = true;
-        button.textContent = "Configure qBittorrent";
-        button.title =
-          "Set up the qBittorrent connection in the extension popup.";
-      });
-      return;
-    }
-
-    const result = await sendRuntimeMessage({ type: "GET_RULES", settings });
-
-    if (!result?.ok) {
-      document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
-        button.disabled = true;
-        button.textContent = "qBittorrent unavailable";
-        button.title =
-          result?.error || "Configure qBittorrent in the extension popup.";
-      });
-      return;
-    }
-
-    knownRuleNames = new Set(
-      (result.names || []).map((name) => normalizeRuleLookupValue(name)),
-    );
-    document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
-      button.disabled = false;
-      setButtonState(button, button.dataset.animeTitle || "");
-    });
-
-    return result;
-  }
-
   async function onRuleButtonClick(event) {
     const button = event.currentTarget;
     const title = button.dataset.animeTitle;
     const exists = button.dataset.exists === "true";
+    debugLog("onRuleButtonClick", {
+      title,
+      exists,
+      action: exists ? "remove" : "add",
+    });
     const settingsResult = await storageGet("settings");
     const settings = settingsResult?.settings || {};
     button.disabled = true;
@@ -649,7 +800,11 @@
   }
 
   function injectButtons() {
-    for (const entry of findScheduleEntries()) {
+    const entries = findScheduleEntries();
+    debugLog("injectButtons:start", {
+      entryCount: entries.length,
+    });
+    for (const entry of entries) {
       const container = entry.element || entry;
       if (container.querySelector(`.${BUTTON_CLASS}`)) continue;
       const title = extractTitle(entry);
@@ -680,10 +835,13 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
+    debugLog("runtime-message", { type: message?.type });
     if (message?.type === "REFRESH_RULES") {
-      refreshRules()
-        .then((rulesResult) => refreshMissingRuleList(rulesResult))
-        .catch(() => undefined);
+      void refreshRulesAndMissingList().catch((error) =>
+        debugLog("REFRESH_RULES:error", {
+          error: error?.message || String(error),
+        }),
+      );
     }
   });
 
@@ -697,15 +855,20 @@
           "#full-schedule-table tr td.all-schedule-show a",
         ) ||
         document.querySelector("#full-schedule-table td.all-schedule-show a");
+      attempts += 1;
+      debugLog("waitForScheduleTable:check", {
+        attempt: attempts,
+        found: !!hasScheduleRows,
+      });
       if (hasScheduleRows) {
         callback();
         return;
       }
 
-      attempts += 1;
       if (attempts < maxAttempts) {
         setTimeout(check, 250);
       } else {
+        debugLog("waitForScheduleTable:timeout", { attempts });
         callback();
       }
     }
@@ -714,6 +877,7 @@
   }
 
   async function start() {
+    debugLog("start", { startHandled, readyState: document.readyState });
     if (startHandled) return;
     startHandled = true;
 
@@ -721,9 +885,9 @@
     chrome.runtime.sendMessage({ type: "START_QBITTORRENT_PROBE" });
 
     waitForScheduleTable(async () => {
+      debugLog("start:table-ready");
       injectButtons();
-      const rulesResult = await refreshRules();
-      await refreshMissingRuleList(rulesResult);
+      await refreshRulesAndMissingList();
     });
   }
 
