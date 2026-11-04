@@ -1,7 +1,6 @@
 (() => {
   const BUTTON_CLASS = "sp-qbt-rule-button";
   const THEME_STYLE_ID = "sp-qbt-page-theme-styles";
-  const DEBUG = true;
   let knownRuleNames = new Set();
   const artworkCache = new Map();
   const artworkRequests = new Map();
@@ -10,14 +9,7 @@
   let startHandled = false;
   let missingRuleRenderGeneration = 0;
 
-  function debugLog(label, details) {
-    if (!DEBUG) return;
-    const payload = details === undefined ? {} : details;
-    console.debug(`[sp-qbt] ${label}`, payload);
-  }
-
   function injectThemeStyles() {
-    debugLog("injectThemeStyles", { themeStyleId: THEME_STYLE_ID });
     if (document.getElementById(THEME_STYLE_ID)) return;
 
     const style = document.createElement("style");
@@ -175,9 +167,6 @@
   }
 
   function findScheduleEntries() {
-    debugLog("findScheduleEntries", {
-      hasTable: !!document.querySelector("#full-schedule-table"),
-    });
     const table = document.querySelector("#full-schedule-table");
     if (!table) {
       const selectors = [
@@ -258,22 +247,15 @@
   async function resolveArtworkForTitle(title) {
     const query = String(title || "").trim();
     const cacheKey = normalizeRuleLookupValue(query);
-    debugLog("resolveArtworkForTitle:start", { title: query, cacheKey });
     if (!query) {
-      debugLog("resolveArtworkForTitle:empty", { title: query });
       return { href: "#", imageUrl: "" };
     }
     if (artworkCache.has(cacheKey)) {
       const cached = artworkCache.get(cacheKey);
-      debugLog("resolveArtworkForTitle:cache-hit", {
-        title: query,
-        href: cached?.href || "#",
-      });
       return cached;
     }
     if (artworkRequests.has(cacheKey)) {
       const pending = artworkRequests.get(cacheKey);
-      debugLog("resolveArtworkForTitle:request-pending", { title: query });
       return pending;
     }
 
@@ -311,11 +293,6 @@
     artworkRequests.set(cacheKey, request);
     try {
       const result = await request;
-      debugLog("resolveArtworkForTitle:resolved", {
-        title: query,
-        href: result?.href || "#",
-        imageUrl: result?.imageUrl || "",
-      });
       return result;
     } finally {
       artworkRequests.delete(cacheKey);
@@ -368,8 +345,9 @@
 
   function hasScheduleLinks() {
     return !!(
-      document.querySelector("#full-schedule-table tr td.all-schedule-show a") ||
-      document.querySelector("#full-schedule-table td.all-schedule-show a")
+      document.querySelector(
+        "#full-schedule-table tr td.all-schedule-show a",
+      ) || document.querySelector("#full-schedule-table td.all-schedule-show a")
     );
   }
 
@@ -411,7 +389,11 @@
     return false;
   }
 
-  function getMissingRuleNames(rules, settings, scheduleTitles = getCurrentScheduleTitles()) {
+  function getMissingRuleNames(
+    rules,
+    settings,
+    scheduleTitles = getCurrentScheduleTitles(),
+  ) {
     const missing = new Set();
 
     for (const [ruleName, ruleDef] of Object.entries(rules || {})) {
@@ -448,13 +430,8 @@
 
   async function buildRuleWidget(rules, settings) {
     const generation = ++missingRuleRenderGeneration;
-    debugLog("buildRuleWidget:start", {
-      ruleCount: Object.keys(rules || {}).length,
-      generation,
-    });
 
     if (!hasScheduleLinks()) {
-      debugLog("buildRuleWidget:waiting-for-schedule", { generation });
       return;
     }
 
@@ -516,11 +493,6 @@
     nextTable.cellPadding = 0;
     nextTable.cellSpacing = 0;
     nextTable.border = 0;
-
-    debugLog("buildRuleWidget:result", {
-      missingCount: missing.length,
-      scheduleCount: scheduleTitles.size,
-    });
 
     if (!missing.length) {
       const row = document.createElement("tr");
@@ -609,7 +581,6 @@
     }
 
     if (generation !== missingRuleRenderGeneration) {
-      debugLog("buildRuleWidget:skipped-stale-render", { generation });
       return;
     }
 
@@ -624,25 +595,20 @@
     const cacheKey = getSettingsKey(settings);
     const cachedResult = ruleResultCache.get(cacheKey);
     if (cachedResult) {
-      debugLog("fetchRulesFromQbittorrent:cache-hit", { cacheKey });
       return cachedResult;
     }
     if (ruleRequestInFlight && ruleRequestInFlight.key === cacheKey) {
-      debugLog("fetchRulesFromQbittorrent:in-flight", { cacheKey });
       return ruleRequestInFlight.promise;
     }
 
-    debugLog("fetchRulesFromQbittorrent:start", { retries, cacheKey });
     const request = (async () => {
       let lastResult = null;
       for (let attempt = 0; attempt < retries; attempt += 1) {
-        const result = await sendRuntimeMessage({ type: "GET_RULES", settings });
-        lastResult = result;
-        debugLog("fetchRulesFromQbittorrent:attempt", {
-          attempt: attempt + 1,
-          ok: !!result?.ok,
-          ruleCount: Object.keys(result?.rules || {}).length,
+        const result = await sendRuntimeMessage({
+          type: "GET_RULES",
+          settings,
         });
+        lastResult = result;
         if (result?.ok && result.rules) {
           ruleResultCache.set(cacheKey, result);
           return result;
@@ -651,9 +617,6 @@
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
-      debugLog("fetchRulesFromQbittorrent:failed", {
-        error: lastResult?.error || "Could not fetch RSS rules.",
-      });
       return lastResult || { ok: false, error: "Could not fetch RSS rules." };
     })();
 
@@ -668,14 +631,10 @@
   }
 
   async function refreshRulesAndMissingList(existingResult) {
-    debugLog("refreshRulesAndMissingList:start", {
-      hasExistingResult: !!existingResult,
-    });
     const settingsResult = await storageGet("settings");
     const settings = settingsResult?.settings;
 
     if (!settings?.url || !settings.username || !settings.password) {
-      debugLog("refreshRulesAndMissingList:missing-settings");
       document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
         button.disabled = true;
         button.textContent = "Configure qBittorrent";
@@ -686,14 +645,13 @@
     }
 
     if (!hasScheduleLinks()) {
-      debugLog("refreshRulesAndMissingList:waiting-for-schedule");
       return;
     }
 
-    const result = existingResult || (await fetchRulesFromQbittorrent(settings));
+    const result =
+      existingResult || (await fetchRulesFromQbittorrent(settings));
 
     if (!result?.ok || !result.rules) {
-      debugLog("refreshRulesAndMissingList:unavailable", { error: result?.error });
       document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
         button.disabled = true;
         button.textContent = "qBittorrent unavailable";
@@ -706,23 +664,16 @@
     knownRuleNames = new Set(
       (result.names || []).map((name) => normalizeRuleLookupValue(name)),
     );
-    debugLog("refreshRulesAndMissingList:known-rules", {
-      count: knownRuleNames.size,
-    });
     document.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => {
       button.disabled = false;
       setButtonState(button, button.dataset.animeTitle || "");
     });
 
-    debugLog("refreshRulesAndMissingList:rules-fetched", {
-      ruleCount: Object.keys(result.rules || {}).length,
-    });
     await buildRuleWidget(result.rules, settings);
     return result;
   }
 
   function storageGet(keys) {
-    debugLog("storageGet", { keys });
     return new Promise((resolve) => {
       try {
         chrome.storage.local.get(keys, (result) => {
@@ -740,7 +691,6 @@
   }
 
   function sendRuntimeMessage(message) {
-    debugLog("sendRuntimeMessage", { type: message?.type });
     return new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(message, (response) => {
@@ -766,11 +716,6 @@
     const button = event.currentTarget;
     const title = button.dataset.animeTitle;
     const exists = button.dataset.exists === "true";
-    debugLog("onRuleButtonClick", {
-      title,
-      exists,
-      action: exists ? "remove" : "add",
-    });
     const settingsResult = await storageGet("settings");
     const settings = settingsResult?.settings || {};
     button.disabled = true;
@@ -801,9 +746,6 @@
 
   function injectButtons() {
     const entries = findScheduleEntries();
-    debugLog("injectButtons:start", {
-      entryCount: entries.length,
-    });
     for (const entry of entries) {
       const container = entry.element || entry;
       if (container.querySelector(`.${BUTTON_CLASS}`)) continue;
@@ -835,10 +777,9 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    debugLog("runtime-message", { type: message?.type });
     if (message?.type === "REFRESH_RULES") {
       void refreshRulesAndMissingList().catch((error) =>
-        debugLog("REFRESH_RULES:error", {
+        console.log("REFRESH_RULES:error", {
           error: error?.message || String(error),
         }),
       );
@@ -856,10 +797,6 @@
         ) ||
         document.querySelector("#full-schedule-table td.all-schedule-show a");
       attempts += 1;
-      debugLog("waitForScheduleTable:check", {
-        attempt: attempts,
-        found: !!hasScheduleRows,
-      });
       if (hasScheduleRows) {
         callback();
         return;
@@ -868,7 +805,6 @@
       if (attempts < maxAttempts) {
         setTimeout(check, 250);
       } else {
-        debugLog("waitForScheduleTable:timeout", { attempts });
         callback();
       }
     }
@@ -877,7 +813,6 @@
   }
 
   async function start() {
-    debugLog("start", { startHandled, readyState: document.readyState });
     if (startHandled) return;
     startHandled = true;
 
@@ -885,7 +820,6 @@
     chrome.runtime.sendMessage({ type: "START_QBITTORRENT_PROBE" });
 
     waitForScheduleTable(async () => {
-      debugLog("start:table-ready");
       injectButtons();
       await refreshRulesAndMissingList();
     });
