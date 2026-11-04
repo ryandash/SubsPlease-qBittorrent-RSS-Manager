@@ -1,399 +1,135 @@
-const form = document.getElementById("settings-form");
-const urlInput = document.getElementById("url");
-const userInput = document.getElementById("username");
-const passInput = document.getElementById("password");
-const testButton = document.getElementById("test");
-const statusText = document.getElementById("status");
-const statusDot = document.getElementById("status-dot");
-const feedSelect = document.getElementById("feed-select");
-const themeToggle = document.getElementById("theme-toggle");
+import {
+  getLocalStorage,
+  requestOriginPermission,
+  sendRuntimeMessage,
+  setLocalStorage,
+} from "./shared/chrome-api.js";
+import {
+  hostPermissionPattern,
+  normalizeUrl,
+  validateWebUiUrl,
+} from "./shared/settings.js";
+import {
+  applyTheme,
+  getPopupElements,
+  renderFeedOptions,
+  showStatus,
+} from "./popup/ui.js";
 
-function storageGet(keys) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.storage.local.get(keys, (result) => {
-        const error = chrome.runtime.lastError;
-        if (error) return reject(new Error(error.message));
-        resolve(result);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+const elements = getPopupElements(document);
 
-function storageSet(values) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.storage.local.set(values, () => {
-        const error = chrome.runtime.lastError;
-        if (error) return reject(new Error(error.message));
-        resolve();
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function sanitizeSettings(settings) {
-  if (!settings) return null;
+function settingsFromForm() {
   return {
-    url: settings.url || null,
-    username: settings.username ? "[redacted]" : null,
-    password: settings.password ? "[redacted]" : null,
-    defaultFeed: settings.defaultFeed || null,
+    url: normalizeUrl(elements.url.value),
+    username: elements.username.value,
+    password: elements.password.value,
+    theme: elements.themeToggle.checked ? "dark" : "light",
+    defaultFeed: elements.feedSelect.value || "",
   };
 }
 
-function sendRuntimeMessage(message) {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage(message, (response) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          resolve({ ok: false, error: error.message });
-          return;
-        }
-        resolve(response ?? { ok: false, error: "No response from extension background script." });
-      });
-    } catch (error) {
-      resolve({ ok: false, error: error.message || String(error) });
-    }
-  });
+async function saveSettings(changes) {
+  const { settings = {} } = await getLocalStorage("settings");
+  await setLocalStorage({ settings: { ...settings, ...changes } });
 }
 
-function permissionContains(details) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.permissions.contains(details, (result) => {
-        const error = chrome.runtime.lastError;
-        if (error) return reject(new Error(error.message));
-        resolve(result);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function permissionRequest(details) {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.permissions.request(details, (granted) => {
-        const error = chrome.runtime.lastError;
-        if (error) return reject(new Error(error.message));
-        resolve(granted);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function normalizeFeedOption(feed) {
-  if (typeof feed === "string") {
-    return { label: feed, value: feed };
-  }
-  if (feed && typeof feed === "object") {
-    return {
-      label: feed.display || feed.label || feed.name || feed.value || "",
-      value: feed.value || feed.url || feed.label || feed.name || "",
-    };
-  }
-  return { label: "", value: "" };
-}
-
-function renderFeedOptions(feeds, selected) {
-  const options = (feeds || [])
-    .map(normalizeFeedOption)
-    .filter((feed) => feed.label && feed.value);
-  const uniqueFeeds = [];
-  const seen = new Set();
-  for (const feed of options) {
-    const key = `${feed.value}|${feed.label}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniqueFeeds.push(feed);
-  }
-  feedSelect.innerHTML = "";
-
-  if (!uniqueFeeds.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No RSS feeds available";
-    feedSelect.appendChild(option);
-    feedSelect.disabled = true;
-    return;
-  }
-
-  const selectedValue = uniqueFeeds.some((feed) => feed.value === selected)
-    ? selected
-    : uniqueFeeds[0].value;
-
-  for (const feed of uniqueFeeds) {
-    const option = document.createElement("option");
-    option.value = feed.value;
-    option.textContent = feed.label;
-    if (feed.value === selectedValue) option.selected = true;
-    feedSelect.appendChild(option);
-  }
-  feedSelect.disabled = false;
-  feedSelect.value = selectedValue;
-}
-
-function showStatus(message, kind = "") {
-  statusText.textContent = message;
-  statusDot.className = `dot ${kind}`;
-}
-
-function currentTheme() {
-  return themeToggle?.checked ? "dark" : "light";
-}
-
-function applyTheme(theme) {
-  const resolvedTheme = theme === "light" ? "light" : "dark";
-  document.body.dataset.theme = resolvedTheme;
-  if (themeToggle) {
-    themeToggle.checked = resolvedTheme === "dark";
-  }
-}
-
-function normalizedUrl(value) {
-  return value.trim().replace(/\/+$/, "");
-}
-
-async function loadFeeds() {
-  const settings = {
-    url: normalizedUrl(urlInput.value),
-    username: userInput.value,
-    password: passInput.value,
-    theme: currentTheme(),
-  };
-
-  if (!settings.url || !settings.username || !settings.password) {
-    renderFeedOptions([], "");
-    return;
-  }
-
+async function finishConnectionTest(settings, permission, initialSave = Promise.resolve()) {
   try {
-    const result = await sendRuntimeMessage({
-      type: "GET_FEEDS",
-      settings,
-    });
-    if (!result?.ok) {
-      renderFeedOptions([], "");
-      return;
+    if (!(await permission)) {
+      throw new Error("Chrome permission to access this qBittorrent host was not granted.");
     }
+    await initialSave;
 
-    const storedSettings = (await storageGet("settings")).settings || {};
-    const selectedFeed = storedSettings.defaultFeed || result.feeds?.[0]?.value || result.names?.[0] || "";
-    renderFeedOptions(result.feeds || result.names || [], selectedFeed);
-    if (feedSelect.value) {
-      const nextSettings = {
-        ...storedSettings,
-        url: settings.url,
-        username: settings.username,
-        password: settings.password,
-        theme: currentTheme(),
-        defaultFeed: feedSelect.value,
-      };
-      await storageSet({ settings: nextSettings });
-    }
-  } catch {
-    renderFeedOptions([], "");
-  }
-}
-
-async function loadSettings() {
-  const { settings } = await storageGet("settings");
-  const theme = settings?.theme || "dark";
-  applyTheme(theme);
-  if (!settings) return;
-  urlInput.value = settings.url || "http://localhost:8039";
-  userInput.value = settings.username || "";
-  passInput.value = settings.password || "";
-  if (settings.defaultFeed) {
-    renderFeedOptions([settings.defaultFeed], settings.defaultFeed);
-  }
-  if (settings.url && settings.username && settings.password) {
-    showStatus("Settings loaded; attempting login…");
-    await testConnection();
-  }
-}
-
-async function refreshFeedsAfterConnection() {
-  const settings = {
-    url: normalizedUrl(urlInput.value),
-    username: userInput.value,
-    password: passInput.value,
-    theme: currentTheme(),
-  };
-
-  if (!settings.url || !settings.username || !settings.password) return;
-
-  const result = await sendRuntimeMessage({
-    type: "GET_FEEDS",
-    settings,
-  });
-
-  if (!result?.ok || !(result.feeds || result.names)) {
-    renderFeedOptions([], "");
-    return;
-  }
-
-  const feedOptions = result.feeds || result.names || [];
-  const selectedDefault = (await storageGet("settings")).settings?.defaultFeed || feedOptions[0]?.value || feedOptions[0] || "";
-  renderFeedOptions(feedOptions, selectedDefault);
-
-  const currentSettings = (await storageGet("settings")).settings || {};
-  await storageSet({
-    settings: {
-      ...currentSettings,
-      url: settings.url,
-      username: settings.username,
-      password: settings.password,
-      theme: currentTheme(),
-      defaultFeed: feedSelect.value || selectedDefault || "",
-    },
-  });
-}
-
-async function requestHostPermission() {
-  const parsed = new URL(normalizedUrl(urlInput.value));
-  const pattern = `${parsed.protocol}//${parsed.host}/*`;
-  const allowedRemotePatterns = [
-    "http://localhost/*",
-    "http://127.0.0.1/*",
-    "https://subsplease.org/*",
-  ];
-
-  if (allowedRemotePatterns.includes(pattern)) {
-    return true;
-  }
-
-  const alreadyGranted = await permissionContains({
-    origins: [pattern],
-  });
-  if (alreadyGranted) return true;
-
-  try {
-    return await permissionRequest({ origins: [pattern] });
-  } catch {
-    return false;
-  }
-}
-
-async function testConnection() {
-  testButton.disabled = true;
-  const settings = {
-    url: normalizedUrl(urlInput.value),
-    username: userInput.value,
-    password: passInput.value,
-    theme: currentTheme(),
-  };
-  showStatus("Checking site permission…");
-  try {
-    const permitted = await requestHostPermission();
-    if (!permitted)
-      throw new Error(
-        "Chrome permission to access this qBittorrent host was not granted.",
-      );
-    showStatus("Testing connection…");
-    const result = await sendRuntimeMessage({
+    showStatus(elements, "Testing connection…");
+    const connection = await sendRuntimeMessage({
       type: "TEST_CONNECTION",
       settings,
     });
-    if (!result?.ok) throw new Error(result?.error || "Connection failed.");
+    if (!connection.ok) throw new Error(connection.error || "Connection failed.");
 
-    const feedResult = await sendRuntimeMessage({
-      type: "GET_FEEDS",
-      settings,
-    });
-    if (!feedResult?.ok || !(feedResult.feeds || feedResult.names)) {
-      renderFeedOptions([], "");
-      showStatus(
-        `Connected to qBittorrent${result.version ? ` (${result.version})` : ""}.`,
-        "ok",
-      );
-      return;
-    }
-
-    const feedOptions = feedResult.feeds || feedResult.names || [];
-    const storedSettings = (await storageGet("settings")).settings || {};
-    const selectedDefault =
-      storedSettings.defaultFeed ||
-      feedOptions[0]?.value ||
-      feedOptions[0] ||
-      "";
-    renderFeedOptions(feedOptions, selectedDefault);
-    await storageSet({
+    const feeds = await sendRuntimeMessage({ type: "GET_FEEDS", settings });
+    const { settings: storedSettings = {} } = await getLocalStorage("settings");
+    const feedOptions = feeds.ok ? feeds.feeds || feeds.names || [] : [];
+    const selectedFeed =
+      storedSettings.defaultFeed || feedOptions[0]?.value || feedOptions[0] || "";
+    renderFeedOptions(elements.feedSelect, feedOptions, selectedFeed);
+    await setLocalStorage({
       settings: {
         ...storedSettings,
-        url: settings.url,
-        username: settings.username,
-        password: settings.password,
-        theme: currentTheme(),
-        defaultFeed: feedSelect.value || selectedDefault || "",
+        ...settings,
+        defaultFeed: elements.feedSelect.value || selectedFeed,
       },
     });
 
     showStatus(
-      `Connected to qBittorrent${result.version ? ` (${result.version})` : ""}.`,
+      elements,
+      `Connected to qBittorrent${connection.version ? ` (${connection.version})` : ""}.`,
       "ok",
     );
   } catch (error) {
-    showStatus(error.message || "Connection failed.", "bad");
+    showStatus(elements, error?.message || "Connection failed.", "bad");
   } finally {
-    testButton.disabled = false;
+    elements.testButton.disabled = false;
   }
 }
 
-testButton.addEventListener("click", testConnection);
-
-feedSelect.addEventListener("change", async () => {
-  const { settings } = await storageGet("settings");
-  const nextSettings = {
-    ...(settings || {}),
-    url: settings?.url || normalizedUrl(urlInput.value),
-    username: settings?.username || userInput.value,
-    password: settings?.password || passInput.value,
-    theme: currentTheme(),
-    defaultFeed: feedSelect.value || "",
-  };
-  await storageSet({ settings: nextSettings });
-});
-
-themeToggle.addEventListener("change", async () => {
-  const theme = currentTheme();
-  applyTheme(theme);
-  const { settings } = await storageGet("settings");
-  await storageSet({
-    settings: {
-      ...(settings || {}),
-      theme,
-    },
-  });
-});
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const settings = {
-    url: normalizedUrl(urlInput.value),
-    username: userInput.value,
-    password: passInput.value,
-    theme: currentTheme(),
-    defaultFeed: feedSelect.value || "",
-  };
+function testConnection() {
+  elements.testButton.disabled = true;
   try {
-    new URL(settings.url);
-  } catch {
-    showStatus("Enter a valid Web UI URL.", "bad");
-    return;
+    const settings = settingsFromForm();
+    settings.url = validateWebUiUrl(settings.url);
+    elements.url.value = settings.url;
+    showStatus(elements, "Checking site permission…");
+    void finishConnectionTest(
+      settings,
+      requestOriginPermission(hostPermissionPattern(settings.url)),
+    );
+  } catch (error) {
+    elements.testButton.disabled = false;
+    showStatus(elements, error?.message || "Enter a valid Web UI URL.", "bad");
   }
-  await storageSet({ settings });
-  showStatus("Settings saved. Testing connection…");
-  await testConnection();
+}
+
+async function loadSettings() {
+  const { settings } = await getLocalStorage("settings");
+  applyTheme(elements, settings?.theme || "dark");
+  if (!settings) return;
+
+  elements.url.value = settings.url || "http://localhost:8039";
+  elements.username.value = settings.username || "";
+  elements.password.value = settings.password || "";
+  if (settings.defaultFeed) {
+    renderFeedOptions(elements.feedSelect, [settings.defaultFeed], settings.defaultFeed);
+  }
+  showStatus(elements, "Settings loaded. Test the connection to refresh feeds.");
+}
+
+elements.testButton.addEventListener("click", testConnection);
+
+elements.feedSelect.addEventListener("change", () =>
+  saveSettings({ defaultFeed: elements.feedSelect.value || "" }),
+);
+
+elements.themeToggle.addEventListener("change", () => {
+  const theme = elements.themeToggle.checked ? "dark" : "light";
+  applyTheme(elements, theme);
+  return saveSettings({ theme });
 });
 
-loadSettings();
+elements.form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  try {
+    const settings = settingsFromForm();
+    settings.url = validateWebUiUrl(settings.url);
+    elements.url.value = settings.url;
+    const permission = requestOriginPermission(hostPermissionPattern(settings.url));
+    const initialSave = saveSettings(settings);
+    elements.testButton.disabled = true;
+    showStatus(elements, "Settings saved. Testing connection…");
+    void finishConnectionTest(settings, permission, initialSave);
+  } catch (error) {
+    showStatus(elements, error?.message || "Enter a valid Web UI URL.", "bad");
+  }
+});
+
+void loadSettings();

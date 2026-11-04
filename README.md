@@ -7,7 +7,7 @@ Chrome Manifest V3 extension that adds buttons to the SubsPlease schedule page a
 - Green `✓ Add RSS` button: creates a rule named `<exact schedule title>`.
 - Red `✕ Delete RSS` button: removes only the matching rule with that exact title.
 - Default RSS feed: choose the feed to apply in the extension popup. The rule's `affectedFeeds` field is set to that feed.
-- Rule criteria: a regular-expression lookahead requires both the exact literal schedule title and `1080p` to appear in the release name. The title is regex-escaped before use.
+- Rule criteria: the exact schedule title is stored in qBittorrent's `mustContain` field. Add any release-quality filtering you want in qBittorrent itself.
 - Download location: qBittorrent's default download location.
 - The extension does not create, modify, or delete RSS feed sources.
 
@@ -27,7 +27,7 @@ Chrome Manifest V3 extension that adds buttons to the SubsPlease schedule page a
 12. Click **Save settings**.
 13. Open or reload `https://subsplease.org/schedule` and the add (+)/remove(x) RSS buttons should appear.
 
-If Chrome shows a permission prompt, allow access to the qBittorrent host. For local installs, this is usually `http://localhost` or `http://127.0.0.1`.
+When testing a connection, Chrome asks for access to the configured qBittorrent host. Allow the prompt for your local or trusted-network Web UI.
 
 ## qBittorrent compatibility
 
@@ -39,13 +39,24 @@ This extension uses these Web API endpoints:
 - `POST /api/v2/rss/setRule`
 - `POST /api/v2/rss/removeRule`
 
-qBittorrent's RSS rule JSON schema has changed across releases. This project uses the documented fields `enabled`, `mustContain`, `mustNotContain`, `useRegex`, `episodeFilter`, `smartFilter`, `previouslyMatchedEpisodes`, `affectedFeeds`, and `ignoreDays`. In qBittorrent, `mustContain` is a single string, not an array. The extension uses regex lookaheads to require both the escaped exact title and `1080p`. Verify the rule creation payload against the API documentation for your installed qBittorrent version if `setRule` returns an error.
+qBittorrent's RSS rule JSON schema has changed across releases. This project uses the documented fields `enabled`, `mustContain`, `mustNotContain`, `useRegex`, `episodeFilter`, `smartFilter`, `previouslyMatchedEpisodes`, `affectedFeeds`, and `ignoreDays`. In qBittorrent, `mustContain` is a single string, not an array. Verify the rule creation payload against the API documentation for your installed qBittorrent version if `setRule` returns an error.
+
+## Extension architecture
+
+- `background.js` is a Manifest V3 module service worker that routes messages.
+- `background/qbittorrent-client.js` owns qBittorrent authentication and API requests.
+- `shared/` contains the popup/service-worker browser and settings utilities.
+- `popup/ui.js` contains popup rendering; `content-utils.js` and `content-artwork.js` are classic content-script helpers loaded before `content.js`.
+
+The service worker no longer polls indefinitely for qBittorrent. Each operation logs in only when needed, deduplicates concurrent logins, retries once after a 403 response, and has a 10-second request timeout. The schedule page lazily resolves show artwork only after the corresponding link receives focus or pointer hover.
+
+The toolbar icon is an `S`: green after the last successful qBittorrent request, red after a failed request, and gray until the connection is tested. Loading the SubsPlease schedule also makes one login attempt. These are event-driven checks; the extension does not poll qBittorrent in the background.
 
 ## Important limitations / security
 
-- The SubsPlease page markup may change. `content.js` uses conservative selector fallbacks; if buttons do not appear, inspect the schedule page's current DOM and update `findScheduleEntries()` / `extractTitle()`.
+- The SubsPlease page markup may change. If buttons do not appear, inspect the schedule page's current DOM and update `SCHEDULE_LINK_SELECTOR` / `getScheduleEntries()` in `content.js`.
 - Exact matching means the schedule title is included as a literal required term, not a regex.
 - Credentials are stored in `chrome.storage.local`. This is local extension storage, not a dedicated secrets vault. Use a strong qBittorrent password and keep the Web UI bound to localhost or a trusted network.
-- The extension requests optional HTTP/HTTPS host access because users may configure a non-localhost host or nonstandard port. Chrome may ask for permission when connecting. For localhost, the manifest already includes localhost and 127.0.0.1.
+- The extension requests optional HTTP/HTTPS host access only when you test a configured Web UI. Chrome may ask for permission when connecting.
 - If qBittorrent is configured with CSRF protection or reverse-proxy restrictions, configure its Web UI accordingly for local API access.
 - Do not expose the qBittorrent Web UI directly to the public internet unless you are aware of the risks involved
