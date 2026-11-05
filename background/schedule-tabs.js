@@ -6,7 +6,9 @@ export async function refreshScheduleTabs() {
     const results = await Promise.allSettled(
       tabs
         .filter((tab) => Number.isInteger(tab.id))
-        .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "REFRESH_RULES" })),
+        .map((tab) =>
+          chrome.tabs.sendMessage(tab.id, { type: "REFRESH_RULES" }),
+        ),
     );
     return results.some((result) => result.status === "fulfilled");
   } catch {

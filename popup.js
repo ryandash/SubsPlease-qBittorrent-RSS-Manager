@@ -33,10 +33,16 @@ async function saveSettings(changes) {
   await setLocalStorage({ settings: { ...settings, ...changes } });
 }
 
-async function finishConnectionTest(settings, permission, initialSave = Promise.resolve()) {
+async function finishConnectionTest(
+  settings,
+  permission,
+  initialSave = Promise.resolve(),
+) {
   try {
     if (!(await permission)) {
-      throw new Error("Chrome permission to access this qBittorrent host was not granted.");
+      throw new Error(
+        "Chrome permission to access this qBittorrent host was not granted.",
+      );
     }
     await initialSave;
 
@@ -45,16 +51,21 @@ async function finishConnectionTest(settings, permission, initialSave = Promise.
       type: "TEST_CONNECTION",
       settings,
     });
-    if (!connection.ok) throw new Error(connection.error || "Connection failed.");
+    if (!connection.ok)
+      throw new Error(connection.error || "Connection failed.");
 
     const feeds = await sendRuntimeMessage({ type: "GET_FEEDS", settings });
     const { settings: storedSettings = {} } = await getLocalStorage("settings");
     const feedOptions = feeds.ok ? feeds.feeds || feeds.names || [] : [];
     const selectedFeed =
-      storedSettings.defaultFeed || feedOptions[0]?.value || feedOptions[0] || "";
+      storedSettings.defaultFeed ||
+      feedOptions[0]?.value ||
+      feedOptions[0] ||
+      "";
     const selectedFeedLabel =
       feedOptions.find((option) => option.value === selectedFeed)?.label ||
-      feedOptions[0]?.label || "";
+      feedOptions[0]?.label ||
+      "";
     renderFeedOptions(elements.feedSelect, feedOptions, selectedFeed);
     await setLocalStorage({
       settings: {
@@ -95,22 +106,45 @@ function testConnection() {
 }
 
 async function loadSettings() {
-  const { settings } = await getLocalStorage("settings");
-  applyTheme(elements, settings?.theme || "dark");
-  if (!settings) return;
+  const { settings, connectionState } = await getLocalStorage([
+    "settings",
+    "connectionState",
+  ]);
 
-  elements.url.value = settings.url || "http://localhost:8039";
-  elements.username.value = settings.username || "";
-  elements.password.value = settings.password || "";
-  if (settings.defaultFeed) {
-    const storedLabel = settings.defaultFeedLabel || settings.defaultFeed;
+  applyTheme(elements, settings?.theme || "dark");
+
+  elements.url.value = settings?.url || "http://localhost:8039";
+  elements.username.value = settings?.username || "";
+  elements.password.value = settings?.password || "";
+
+  const feeds = connectionState?.feeds || [];
+
+  if (connectionState?.ok && feeds.length) {
+    renderFeedOptions(elements.feedSelect, feeds, settings?.defaultFeed || "");
+  } else if (settings?.defaultFeed) {
     renderFeedOptions(
       elements.feedSelect,
-      [{ label: storedLabel, value: settings.defaultFeed }],
+      [
+        {
+          label: settings.defaultFeedLabel || settings.defaultFeed,
+          value: settings.defaultFeed,
+        },
+      ],
       settings.defaultFeed,
     );
   }
-  showStatus(elements, "Settings loaded. Test the connection to refresh feeds.");
+
+  if (connectionState?.ok) {
+    showStatus(
+      elements,
+      `Connected to qBittorrent${connectionState.version ? ` (${connectionState.version})` : ""}.`,
+      "ok",
+    );
+  } else if (connectionState?.error) {
+    showStatus(elements, connectionState.error, "bad");
+  } else {
+    showStatus(elements, "Waiting for connection test.");
+  }
 }
 
 elements.testButton.addEventListener("click", testConnection);
@@ -131,7 +165,9 @@ elements.form.addEventListener("submit", (event) => {
     const settings = settingsFromForm();
     settings.url = validateWebUiUrl(settings.url);
     elements.url.value = settings.url;
-    const permission = requestOriginPermission(hostPermissionPattern(settings.url));
+    const permission = requestOriginPermission(
+      hostPermissionPattern(settings.url),
+    );
     const initialSave = saveSettings(settings);
     elements.testButton.disabled = true;
     showStatus(elements, "Settings saved. Testing connection…");

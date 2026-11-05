@@ -18,12 +18,25 @@
 }
 
 .sp-qbt-rule-button.is-added,
-#sp-qbt-missing-rules-widget .sp-qbt-missing-rule-button {
+#sp-qbt-missing-rules-widget .sp-qbt-missing-rule-button.is-added {
   background: #d9534f;
 }
 
-.sp-qbt-rule-button.is-missing {
+.sp-qbt-rule-button.is-missing,
+#sp-qbt-missing-rules-widget .sp-qbt-missing-rule-button.is-missing {
   background: #4caf50;
+}
+
+.sp-qbt-rule-button.is-missing span,
+#sp-qbt-missing-rules-widget .sp-qbt-missing-rule-button.is-missing span {
+  display: inline-block;
+  transform: rotate(45deg);
+}
+
+.sp-qbt-rule-button.is-added span,
+.sp-qbt-rule-button.is-missing span,
+#sp-qbt-missing-rules-widget .sp-qbt-missing-rule-button span {
+  font-size: 12px;
 }
 
 .sp-qbt-rule-button:hover,
@@ -108,4 +121,22 @@
     700 12px/1 system-ui,
     sans-serif;
   vertical-align: middle;
+}
+
+#sp-qbt-missing-rules-widget h2.sp-qbt-feed-heading {
+  margin: 20px 0 8px;
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+#sp-qbt-missing-rules-widget h2.sp-qbt-feed-heading:first-of-type {
+  margin-top: 10px;
+}
+
+#sp-qbt-missing-rules-widget .sp-qbt-missing-rules-note {
+  margin: 0 0 12px;
+  color: var(--main-color, inherit);
+  font-size: 0.85rem;
+  opacity: 0.75;
 }

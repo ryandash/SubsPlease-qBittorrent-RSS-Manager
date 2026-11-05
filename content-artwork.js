@@ -31,7 +31,9 @@
 
         return {
           href: result.page ? `/shows/${result.page}` : "#",
-          imageUrl: result.image_url ? `https://subsplease.org${result.image_url}` : "",
+          imageUrl: result.image_url
+            ? `https://subsplease.org${result.image_url}`
+            : "",
         };
       } catch {
         return emptyResult;

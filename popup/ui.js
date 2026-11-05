@@ -43,7 +43,9 @@ export function renderFeedOptions(select, feeds, selected) {
 
   const selectedValue =
     options.find((option) => option.value === selected)?.value ||
-    options.find((option) => `${option.value}\u0000${option.label}` === selected)?.value ||
+    options.find(
+      (option) => `${option.value}\u0000${option.label}` === selected,
+    )?.value ||
     options[0].value;
 
   const fragment = document.createDocumentFragment();

@@ -1,5 +1,7 @@
 export function normalizeUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 export function hasConnectionSettings(settings) {

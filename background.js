@@ -9,7 +9,8 @@ import { refreshScheduleTabs } from "./background/schedule-tabs.js";
 void restoreConnectionStatus();
 
 async function handleMessage(message) {
-  const settings = message?.settings ?? (await getLocalStorage("settings")).settings;
+  const settings =
+    message?.settings ?? (await getLocalStorage("settings")).settings;
   const client = new QbittorrentClient(settings);
   await client.login();
 
@@ -33,11 +34,23 @@ async function handleMessage(message) {
       };
     }
     case "GET_RULES": {
-      const rules = await client.getRules();
-      return { ok: true, rules, names: Object.keys(rules) };
+      const [rules, feeds] = await Promise.all([
+        client.getRules(),
+        client.getFeeds(),
+      ]);
+
+      return {
+        ok: true,
+        rules,
+        names: Object.keys(rules),
+        feeds,
+      };
     }
     case "ADD_RULE":
-      return { ok: true, ...(await client.addRule(message.title)) };
+      return {
+        ok: true,
+        ...(await client.addRule(message.title, message.rule)),
+      };
     case "REMOVE_RULE":
       return { ok: true, ...(await client.removeRule(message.title)) };
     default:
