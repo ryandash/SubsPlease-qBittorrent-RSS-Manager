@@ -48,8 +48,6 @@ qBittorrent's RSS rule JSON schema has changed across releases. This project use
 - `shared/` contains the popup/service-worker browser and settings utilities.
 - `popup/ui.js` contains popup rendering; `content-utils.js` and `content-artwork.js` are classic content-script helpers loaded before `content.js`.
 
-The service worker no longer polls indefinitely for qBittorrent. Each operation logs in only when needed, deduplicates concurrent logins, retries once after a 403 response, and has a 10-second request timeout. The schedule page lazily resolves show artwork only after the corresponding link receives focus or pointer hover.
-
 The toolbar icon is an `S`: green after the last successful qBittorrent request, red after a failed request, and gray until the connection is tested. Loading the SubsPlease schedule also makes one login attempt. These are event-driven checks; the extension does not poll qBittorrent in the background.
 
 ## Important limitations / security
