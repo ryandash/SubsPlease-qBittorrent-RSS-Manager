@@ -1,4 +1,5 @@
 import { hasConnectionSettings, normalizeUrl } from "../shared/settings.js";
+import { normalizeRuleName } from "../shared/util.js";
 
 const loggedInSettings = new Set();
 const pendingLogins = new Map();
@@ -6,14 +7,6 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const FORM_HEADERS = {
   "Content-Type": "application/x-www-form-urlencoded",
 };
-
-function normalizeRuleName(value) {
-  return String(value || "")
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
 
 function feedEntries(payload) {
   const feeds = new Map();
