@@ -126,7 +126,6 @@
         ),
       ];
 
-      // Rules without a feed assignment also belong in Uncategorized.
       if (!matchingFeeds.length) {
         matchingFeeds.push("Uncategorized");
       }
@@ -253,14 +252,12 @@
       fragment.append(table);
     } else {
       for (const [feed, titles] of feedGroups) {
-        // RSS feed heading
         const feedHeading = document.createElement("h2");
         feedHeading.className = "sp-qbt-feed-heading";
         feedHeading.textContent = feed;
 
         fragment.append(feedHeading);
 
-        // RSS feed table
         const table = document.createElement("table");
         table.cellPadding = 0;
         table.cellSpacing = 0;
@@ -416,10 +413,8 @@
       const settings = await app.getSettings();
 
       if (exists) {
-        // Capture the original rule for undo, if available.
         const original = state.ruleDefinitions.get(normalizedTitle);
 
-        // Delete using the rule name only.
         const result = await app.sendRuntimeMessage({
           type: "REMOVE_RULE",
           title,
@@ -430,7 +425,6 @@
           throw new Error(result?.error || "Could not delete the RSS rule.");
         }
 
-        // Preserve the original definition for restoration.
         state.deletedRules.set(normalizedTitle, {
           title: original?.title || title,
           rule: original?.rule || null,
@@ -444,7 +438,6 @@
           throw new Error("Could not find the deleted RSS rule.");
         }
 
-        // Create a new rule using the configured default RSS feed.
         const result = await app.sendRuntimeMessage({
           type: "ADD_RULE",
           title: deleted.title,
